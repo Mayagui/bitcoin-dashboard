@@ -4,3 +4,8 @@ websocket-client
 streamlit
 altair==5.2.0
 typing-extensions==4.11.0
+plotly>=5.0.0
+scikit-learn
+xgboost
+feedparser
+numpy
