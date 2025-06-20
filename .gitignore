@@ -1,0 +1,11 @@
+# .gitignore pour déploiement Streamlit Cloud
+__pycache__/
+*.pyc
+*.db
+*.csv
+.env
+.DS_Store
+*.log
+Dockerfile
+.dockerignore
+README_DEPLOIEMENT.md

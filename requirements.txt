@@ -1,0 +1,6 @@
+requests
+pandas
+websocket-client
+streamlit
+altair==5.2.0
+typing-extensions==4.11.0
