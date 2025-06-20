@@ -23,30 +23,42 @@ st.title("Dashboard Bitcoin - Données historiques")
 
 UPDATE_INTERVAL = 300  # 5 minutes
 
-def update_data():
+# --- FONCTIONS DE MISE À JOUR DES DONNÉES POUR STREAMLIT CLOUD ---
+def update_binance_data():
     try:
-        subprocess.run(["python3", "fetch_btc_data.py"], check=True)
+        from fetch_btc_data import fetch_binance_ohlcv, save_to_sqlite
+        import os
+        import pandas as pd
+        import time
+        # On tente de charger l'ancien CSV s'il existe
+        if os.path.exists("btc_ohlcv.csv"):
+            old_df = pd.read_csv("btc_ohlcv.csv", parse_dates=["open_time", "close_time"])
+            latest_time = int(old_df["open_time"].max().timestamp() * 1000) if not old_df.empty else None
+        else:
+            old_df = pd.DataFrame()
+            latest_time = None
+        new_df = fetch_binance_ohlcv(interval="1h", start_time=latest_time, end_time=int(time.time() * 1000))
+        if not new_df.empty:
+            if not old_df.empty:
+                df = pd.concat([old_df, new_df]).drop_duplicates(subset=["open_time"]).sort_values("open_time")
+            else:
+                df = new_df
+            df.to_csv("btc_ohlcv.csv", index=False)
+            save_to_sqlite(df)
+        elif not old_df.empty:
+            save_to_sqlite(old_df)
     except Exception as e:
-        print(f"Erreur lors de la mise à jour automatique : {e}\nUtilisation du fichier d'historique local.")
+        print(f"Erreur update_binance_data: {e}")
 
-# Lancer la mise à jour automatique dans un thread
-if 'update_thread' not in st.session_state:
-    def update_loop():
-        while True:
-            try:
-                update_data()
-            except Exception as e:
-                print(f"Erreur dans update_loop : {e}")
-            time.sleep(UPDATE_INTERVAL)
-    update_thread = threading.Thread(target=update_loop, daemon=True)
-    update_thread.start()
-    st.session_state['update_thread'] = update_thread
+def update_yahoo_data():
+    try:
+        import fetch_yahoo_btc
+    except Exception as e:
+        print(f"Erreur update_yahoo_data: {e}")
 
-# Mise à jour automatique de l'historique Yahoo Finance à chaque démarrage
-try:
-    subprocess.run(["python3", "fetch_yahoo_btc.py"], check=True)
-except Exception as e:
-    st.warning(f"Erreur lors de la mise à jour de l'historique Yahoo Finance : {e}")
+# --- MISE À JOUR DES DONNÉES AU DÉMARRAGE (remplace subprocess) ---
+update_yahoo_data()
+update_binance_data()
 
 # Affichage des données historiques (toujours depuis le fichier local si l'API échoue)
 df_result = read_from_sqlite() if 'read_from_sqlite' in globals() else (pd.DataFrame(), 'Fonction non trouvée')

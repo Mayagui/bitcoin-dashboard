@@ -9,3 +9,7 @@ scikit-learn
 xgboost
 feedparser
 numpy
+yfinance
+# Ajout explicite pour éviter tout souci d'environnement sur Streamlit Cloud
+pandas
+requests
