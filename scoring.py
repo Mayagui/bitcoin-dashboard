@@ -38,16 +38,25 @@ def compute_score(df):
     return df
 
 def detect_divergence(df):
-    # Divergence simple : MACD et prix ne vont pas dans le même sens
+    # Divergence avancée : MACD et prix ne vont pas dans le même sens, type haussier/baissier
     divergence = [0]
+    divergence_type = [None]
     for i in range(1, len(df)):
         price_delta = float(df['close'].iloc[i]) - float(df['close'].iloc[i-1])
         macd_delta = df['MACD'].iloc[i] - df['MACD'].iloc[i-1]
         if price_delta * macd_delta < 0:
             divergence.append(1)
+            if price_delta < 0 and macd_delta > 0:
+                divergence_type.append('bullish')  # Divergence haussière
+            elif price_delta > 0 and macd_delta < 0:
+                divergence_type.append('bearish')  # Divergence baissière
+            else:
+                divergence_type.append(None)
         else:
             divergence.append(0)
+            divergence_type.append(None)
     df['divergence'] = divergence
+    df['divergence_type'] = divergence_type
     return df
 
 def filter_signals(df, score_threshold=2):

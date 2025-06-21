@@ -169,7 +169,6 @@ def run_backtest(df, strategy='signal', score_threshold=2, initial_capital=10000
     if len(equity) > len(df['open_time']):
         equity = equity[:len(df['open_time'])]
     elif len(equity) < len(df['open_time']):
-        # Si jamais il manque une valeur, on complète avec la dernière equity connue
         equity += [equity[-1]] * (len(df['open_time']) - len(equity))
     equity_curve = pd.DataFrame({'open_time': df['open_time'], 'equity': equity})
     trades = pd.DataFrame(trade_log)

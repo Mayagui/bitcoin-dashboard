@@ -17,6 +17,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 import xgboost as xgb
+import yfinance as yf
 
 st.set_page_config(page_title="Dashboard Bitcoin", layout="wide")
 st.title("Dashboard Bitcoin - Données historiques")
@@ -83,7 +84,37 @@ if isinstance(df, pd.DataFrame) and not df.empty:
 st.sidebar.header("Configuration")
 interval = st.sidebar.selectbox("Intervalle des données", ["1m", "5m", "15m", "1h", "4h", "1d"], index=3)
 score_threshold = st.sidebar.slider("Seuil du score pour signal fort", min_value=1, max_value=4, value=2)
-show_alerts = st.sidebar.checkbox("Activer les alertes en temps réel", value=True)
+
+# --- FEAR & GREED INDEX (sidebar) ---
+def get_fear_greed_index():
+    try:
+        url = "https://api.alternative.me/fng/?limit=1"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            value = int(data['data'][0]['value'])
+            label = data['data'][0]['value_classification']
+            return value, label
+    except Exception:
+        pass
+    return None, None
+
+fear_value, fear_label = get_fear_greed_index()
+if fear_value is not None:
+    color = "#e74c3c" if fear_value < 30 else ("#f1c40f" if fear_value < 60 else "#27ae60")
+    st.sidebar.markdown(f"""
+    <div style='background-color:#222831;padding:0.7em 1em;border-radius:8px;margin-bottom:1em;'>
+        <span style='color:{color};font-size:1.3em;font-weight:bold;'>
+            Fear & Greed Index : {fear_value} ({fear_label})
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.sidebar.markdown(
+        "<div style='background-color:#222831;padding:0.7em 1em;border-radius:8px;margin-bottom:1em;'>"
+        "<span style='color:#888;font-size:1.1em;'>Fear & Greed Index : N/A</span></div>", unsafe_allow_html=True)
+
+# --- OPTIONS D'AFFICHAGE DES INDICATEURS ---
 show_sma = st.sidebar.checkbox("Afficher SMA20/SMA50", value=True)
 show_rsi = st.sidebar.checkbox("Afficher RSI", value=True)
 show_macd = st.sidebar.checkbox("Afficher MACD", value=True)
@@ -153,7 +184,8 @@ tabs = st.tabs([
     "🧪 Backtesting",
     "⚡ Gestion avancée du capital",
     "🤖 Prédiction ML",
-    "📊 Comparaison ML"
+    "📊 Comparaison ML",
+    "🔗 Corrélation"
 ])
 
 # --- INDICATEURS & GRAPHIQUES ---
@@ -163,9 +195,37 @@ with tabs[0]:
         if show_sma:
             st.subheader("Graphique Prix + SMA20/SMA50")
             fig = go.Figure()
-            fig.add_trace(go.Candlestick(x=df_period['open_time'], open=df_period['open'], high=df_period['high'], low=df_period['low'], close=df_period['close'], name='Prix'))
+            fig.add_trace(go.Candlestick(
+                x=df_period['open_time'],
+                open=df_period['open'],
+                high=df_period['high'],
+                low=df_period['low'],
+                close=df_period['close'],
+                name='Prix',
+                increasing_line_color='white',
+                decreasing_line_color='white',
+                increasing_fillcolor='white',
+                decreasing_fillcolor='white',
+                line=dict(width=1)
+            ))
             fig.add_trace(go.Scatter(x=df_period['open_time'], y=df_period['SMA20'], line=dict(color='blue', width=1), name='SMA20'))
             fig.add_trace(go.Scatter(x=df_period['open_time'], y=df_period['SMA50'], line=dict(color='orange', width=1), name='SMA50'))
+            # --- Ajout des signaux forts sur le graphique ---
+            signals = df_period[(df_period['score'] >= score_threshold) & (df_period['divergence'] == 1)]
+            max_signals = 30  # Limite d'affichage pour éviter surcharge
+            if len(signals) > max_signals:
+                signals = signals.tail(max_signals)
+            for _, row in signals.iterrows():
+                fig.add_trace(go.Scatter(
+                    x=[row['open_time']],
+                    y=[row['close']],
+                    mode='markers+text',
+                    marker=dict(symbol='arrow-bar-up', color='green', size=16),
+                    text=["Signal"],
+                    textposition="top center",
+                    name='Signal fort',
+                    showlegend=False
+                ))
             fig.update_layout(xaxis_rangeslider_visible=False, height=500)
             st.plotly_chart(fig, use_container_width=True)
         if show_rsi:
@@ -198,12 +258,11 @@ with tabs[1]:
         filtered = df_period[(df_period['score'] >= score_threshold) & (df_period['divergence'] == 1)]
         if not filtered.empty:
             st.dataframe(filtered[['open_time', 'close', 'score', 'divergence']].tail(1))
-            # Correction : définir last_signal pour éviter NameError
             last_signal = filtered.iloc[-1]
-            if show_alerts:
-                last_time = pd.to_datetime(last_signal['open_time'])
-                st.success(f"🚨 Dernier signal fort détecté : {last_time.strftime('%Y-%m-%d %H:%M')}")
-                st.balloons()
+            last_time = pd.to_datetime(last_signal['open_time'])
+            # Suppression de toute logique d'alerte personnalisée (show_alerts, alert_types, ballons, sons)
+            # Affichage simple du dernier signal fort détecté
+            st.success(f"🚨 Dernier signal fort détecté : {last_time.strftime('%Y-%m-%d %H:%M')}")
         else:
             st.info("Aucun signal fort détecté sur la période.")
     else:
@@ -215,21 +274,15 @@ with tabs[2]:
     try:
         news_feed = feedparser.parse('https://cointelegraph.com/rss/tag/bitcoin')
         if news_feed.entries:
-            news_data = []
             for entry in news_feed.entries[:5]:
-                news_data.append({
-                    'Titre': entry.title,
-                    'Lien': entry.link
-                })
-            st.dataframe(pd.DataFrame(news_data))
+                st.markdown(f"- [{entry.title}]({entry.link})")
         else:
             st.info("Aucune actualité trouvée.")
     except Exception as e:
         st.warning(f"Erreur lors de la récupération ou l'analyse des actualités : {e}")
     st.header("Événements géopolitiques et actualités mondiales (Reuters, filtré)")
     KEYWORDS = [
-        "bitcoin", "fed", "banque centrale", "dollar", "binance", "crypto", "inflation",
-        "interest rate", "central bank", "regulation"
+        "bitcoin", "btc", "crypto", "cryptocurrency", "blockchain", "fed", "banque centrale", "dollar", "binance", "coinbase", "ethereum", "etf", "inflation", "interest rate", "central bank", "regulation", "mining", "halving", "trading", "finance", "marché", "bourse", "nasdaq", "sec", "gouvernement", "politique", "sanction", "usa", "chine", "russie", "europe", "macro", "monétaire", "taux", "réserve", "banque mondiale", "imf", "g7", "g20"
     ]
     try:
         world_news = feedparser.parse('https://feeds.reuters.com/Reuters/worldNews')
@@ -340,8 +393,27 @@ with tabs[4]:
 with tabs[5]:
     st.header("Prédiction du prix de clôture à N jours (RandomForest, XGBoost, LinearRegression)")
     horizon = 7
-    if isinstance(df_period, pd.DataFrame) and not df_period.empty:
-        df_ml = df_period.copy()
+    # Sélecteur de période spécifique pour le ML
+    if isinstance(df, pd.DataFrame) and not df.empty:
+        min_date = df['open_time'].min()
+        max_date = df['open_time'].max() - pd.Timedelta(days=horizon)
+        st.markdown("**Sélectionnez la période d'analyse pour le Machine Learning**")
+        ml_period = st.date_input(
+            "Période ML (début et fin)",
+            value=(max(min_date, max_date - pd.Timedelta(days=365)).date(), max_date.date()),
+            min_value=min_date.date(),
+            max_value=max_date.date(),
+            key="ml_period_date_input"
+        )
+        if isinstance(ml_period, (tuple, list)) and len(ml_period) == 2:
+            ml_start, ml_end = ml_period
+        elif isinstance(ml_period, (tuple, list)) and len(ml_period) == 1:
+            ml_start = ml_end = ml_period[0]
+        else:
+            ml_start = ml_end = ml_period
+        ml_start = pd.to_datetime(ml_start)
+        ml_end = pd.to_datetime(ml_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        df_ml = df[(df['open_time'] >= ml_start) & (df['open_time'] <= ml_end)].copy()
         features = [
             'open', 'high', 'low', 'close', 'volume',
             'SMA20', 'SMA50', 'RSI14', 'MACD', 'MACD_signal', 'VOL20', 'VOL50'
@@ -426,6 +498,21 @@ with tabs[5]:
             'y_pred_xgb': y_pred_xgb,
             'y_pred_lr': y_pred_lr
         }
+        # --- Prédiction sur le futur réel (prochaine date disponible + horizon) ---
+        st.markdown("---")
+        st.subheader(f"Prédiction sur le futur réel (prochaine date + {horizon} jours)")
+        last_row = df[features].iloc[[-1]].copy()
+        for col in features:
+            last_row[col] = pd.to_numeric(last_row[col], errors='coerce')
+        last_row = last_row.astype(float)
+        pred_rf = rf.predict(last_row)[0]
+        pred_xgb = xgbr.predict(last_row)[0]
+        pred_lr = lr.predict(last_row)[0]
+        future_date = df['open_time'].max() + pd.Timedelta(days=horizon)
+        st.write(f"Date prédite : {future_date.date()}")
+        st.write(f"RandomForest : {pred_rf:,.2f} $")
+        st.write(f"XGBoost : {pred_xgb:,.2f} $")
+        st.write(f"LinearRegression : {pred_lr:,.2f} $")
     else:
         st.warning("Pas assez de données pour la prédiction ML sur la période sélectionnée.")
 
@@ -450,5 +537,111 @@ with tabs[6]:
         st.write(f"MSE : {mean_squared_error(y_test, y_pred_lr):.2f}")
         st.write(f"MAE : {mean_absolute_error(y_test, y_pred_lr):.2f}")
         st.write(f"R² : {r2_score(y_test, y_pred_lr):.3f}")
+        # Ajout du graphique d'erreur absolue par date
+        st.subheader("Erreur absolue par date (test)")
+        import numpy as np
+        abs_err_rf = np.abs(y_test - y_pred_rf)
+        abs_err_xgb = np.abs(y_test - y_pred_xgb)
+        abs_err_lr = np.abs(y_test - y_pred_lr)
+        df_err = pd.DataFrame({
+            'Date': y_test.index,
+            'Erreur RF': abs_err_rf,
+            'Erreur XGB': abs_err_xgb,
+            'Erreur LR': abs_err_lr
+        })
+        df_err['Date'] = df_err['Date'].astype(str)
+        df_err = df_err.set_index('Date')
+        st.line_chart(df_err, use_container_width=True)
     else:
         st.info("Lance d'abord une prédiction dans l'onglet ML.")
+
+# --- ANALYSE AUTOMATISÉE DES SIGNAUX ET DIVERGENCES ---
+if isinstance(df, pd.DataFrame) and not df.empty:
+    import datetime
+    now = pd.Timestamp(datetime.datetime.now())
+    last_30d = now - pd.Timedelta(days=30)
+    recent = df[df['open_time'] >= last_30d]
+    n_signaux = recent[(recent['score'] >= score_threshold) & (recent['divergence'] == 1)].shape[0]
+    n_divergences = recent[recent['divergence'] == 1].shape[0]
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"**Analyse 30 derniers jours :**")
+    st.sidebar.markdown(f"- Signaux forts : {n_signaux}")
+    st.sidebar.markdown(f"- Divergences détectées : {n_divergences}")
+    if n_signaux > 0:
+        last_signal = recent[(recent['score'] >= score_threshold) & (recent['divergence'] == 1)]['open_time'].max()
+        st.sidebar.markdown(f"- Dernier signal fort : {last_signal}")
+    else:
+        st.sidebar.markdown("- Aucun signal fort sur 30j")
+    # Tableau récapitulatif
+    st.sidebar.markdown("**Tableau signaux/divergences (30j)**")
+    st.sidebar.dataframe(recent[['open_time','score','divergence']].tail(30), use_container_width=True)
+
+# --- ANALYSE AVANCÉE DES DIVERGENCES ---
+if isinstance(df, pd.DataFrame) and not df.empty and 'divergence_type' in df.columns:
+    recent = df[df['open_time'] >= (pd.Timestamp(datetime.datetime.now()) - pd.Timedelta(days=30))]
+    n_div_bull = recent[recent['divergence_type'] == 'bullish'].shape[0]
+    n_div_bear = recent[recent['divergence_type'] == 'bearish'].shape[0]
+    last_bull = recent[recent['divergence_type'] == 'bullish']['open_time'].max() if n_div_bull > 0 else None
+    last_bear = recent[recent['divergence_type'] == 'bearish']['open_time'].max() if n_div_bear > 0 else None
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Analyse divergences avancée (30j)**")
+    st.sidebar.markdown(f"- Divergences haussières : {n_div_bull}")
+    st.sidebar.markdown(f"- Divergences baissières : {n_div_bear}")
+    if last_bull:
+        st.sidebar.markdown(f"- Dernière haussière : {last_bull}")
+    if last_bear:
+        st.sidebar.markdown(f"- Dernière baissière : {last_bear}")
+    st.sidebar.markdown("**Détails divergences (30j)**")
+    st.sidebar.dataframe(recent[['open_time','score','divergence','divergence_type']].tail(30), use_container_width=True)
+
+# --- CORRELATION AVEC D'AUTRES ACTIFS ---
+with tabs[7]:
+    st.header("Analyse de corrélation avec d'autres actifs")
+    st.markdown("Comparez le Bitcoin à d'autres marchés (S&P500, or, ETH, etc.) sur différentes périodes.")
+    import yfinance as yf
+    default_tickers = 'BTC-USD,ETH-USD,^GSPC,GC=F'
+    tickers_input = st.text_input("Tickers Yahoo Finance à comparer (séparés par virgule ou espace)", value=default_tickers)
+    tickers = [t.strip() for t in tickers_input.replace(',', ' ').split() if t.strip()]
+    period_corr = st.selectbox("Période de corrélation", ["30j", "90j", "1an", "Tout l'historique"], index=0)
+    rolling_window = st.number_input("Fenêtre rolling (jours)", min_value=3, max_value=180, value=30, step=1)
+    if isinstance(df, pd.DataFrame) and not df.empty and tickers:
+        btc = df[['open_time', 'close']].copy()
+        btc = btc.rename(columns={'close': 'BTC-USD'})
+        btc = btc.set_index('open_time')
+        data = btc.copy()
+        for ticker in tickers:
+            if ticker == 'BTC-USD':
+                continue  # déjà présent
+            try:
+                yf_data = yf.download(ticker, start=btc.index.min(), end=btc.index.max())
+                if not yf_data.empty:
+                    yf_data = yf_data[['Close']].rename(columns={'Close': ticker})
+                    yf_data.index = pd.to_datetime(yf_data.index)
+                    data = data.join(yf_data, how='left')
+            except Exception as e:
+                st.warning(f"Erreur récupération {ticker}: {e}")
+        # Nettoyage
+        data = data.dropna()
+        # Sélection période
+        if period_corr == "30j":
+            data = data[data.index >= (data.index.max() - pd.Timedelta(days=30))]
+        elif period_corr == "90j":
+            data = data[data.index >= (data.index.max() - pd.Timedelta(days=90))]
+        elif period_corr == "1an":
+            data = data[data.index >= (data.index.max() - pd.Timedelta(days=365))]
+        # Calcul corrélation
+        corr = data.corr()
+        st.subheader("Matrice de corrélation")
+        st.dataframe(corr, use_container_width=True)
+        # Rolling correlation (fenêtre personnalisée)
+        st.subheader(f"Corrélation glissante ({rolling_window} jours)")
+        for ticker in tickers:
+            if ticker == 'BTC-USD':
+                continue
+            if ticker not in data.columns:
+                st.warning(f"Données manquantes pour {ticker}, impossible de calculer la corrélation glissante.")
+                continue
+            rolling_corr = data['BTC-USD'].rolling(window=rolling_window).corr(data[ticker])
+            st.line_chart(rolling_corr.rename(f'BTC-USD vs {ticker}'))
+    else:
+        st.info("Saisissez au moins un ticker et assurez-vous que les données Bitcoin sont chargées.")
