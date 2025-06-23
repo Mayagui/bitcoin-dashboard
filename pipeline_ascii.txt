@@ -1,0 +1,17 @@
+# Pipeline du projet Bitcoin Dashboard
+
+1. Collecte des données (API Binance, Yahoo, CSV)
+2. Calcul des indicateurs techniques (SMA, RSI, MACD...)
+3. Scoring multi-indicateurs & détection de divergences
+4. Backtesting & Machine Learning
+5. Visualisation interactive (Streamlit)
+
+ASCII :
+
++-------------------+      +---------------------+      +-------------------+      +-------------------+      +-------------------+
+| Collecte Données  | ---> | Indicateurs Tech.   | ---> | Scoring &         | ---> | Backtesting &      | ---> | Dashboard         |
+| (API, CSV)        |      | (SMA, RSI, MACD...) |      | Divergences       |      | Machine Learning   |      | Streamlit         |
++-------------------+      +---------------------+      +-------------------+      +-------------------+      +-------------------+
+
+
+Image pipeline générée ci-dessous.

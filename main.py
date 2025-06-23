@@ -99,16 +99,54 @@ def get_fear_greed_index():
         pass
     return None, None
 
+# --- FEAR & GREED INDEX GAUGE (Plotly) ---
+def plot_fear_greed_gauge(index_value):
+    if index_value <= 25:
+        label = "Extreme Fear"
+        color = "#d90429"
+    elif index_value <= 45:
+        label = "Fear"
+        color = "#ffba08"
+    elif index_value < 55:
+        label = "Neutral"
+        color = "#f7b801"
+    elif index_value < 75:
+        label = "Greed"
+        color = "#43aa8b"
+    else:
+        label = "Extreme Greed"
+        color = "#008000"
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = index_value,
+        number = {'suffix': f" ({label})", 'font': {'color': color, 'size': 28}},
+        gauge = {
+            'axis': {'range': [0, 100], 'tickwidth': 2, 'tickcolor': '#888'},
+            'bar': {'color': color, 'thickness': 0.25},
+            'bgcolor': "#222831",
+            'steps': [
+                {'range': [0, 25], 'color': '#d90429'},
+                {'range': [25, 45], 'color': '#ffba08'},
+                {'range': [45, 55], 'color': '#f7b801'},
+                {'range': [55, 75], 'color': '#43aa8b'},
+                {'range': [75, 100], 'color': '#008000'}
+            ],
+            'threshold': {
+                'line': {'color': color, 'width': 6},
+                'thickness': 0.8,
+                'value': index_value
+            }
+        },
+        domain = {'x': [0, 1], 'y': [0, 1]},
+        title = {'text': '<b>Fear & Greed Index</b>', 'font': {'size': 22, 'color': color}}
+    ))
+    fig.update_layout(margin=dict(l=10, r=10, t=40, b=10), paper_bgcolor="#222831", font=dict(color="#FFD700"))
+    return fig
+
 fear_value, fear_label = get_fear_greed_index()
 if fear_value is not None:
-    color = "#e74c3c" if fear_value < 30 else ("#f1c40f" if fear_value < 60 else "#27ae60")
-    st.sidebar.markdown(f"""
-    <div style='background-color:#222831;padding:0.7em 1em;border-radius:8px;margin-bottom:1em;'>
-        <span style='color:{color};font-size:1.3em;font-weight:bold;'>
-            Fear & Greed Index : {fear_value} ({fear_label})
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+    sidebar_gauge = plot_fear_greed_gauge(fear_value)
+    st.sidebar.plotly_chart(sidebar_gauge, use_container_width=True)
 else:
     st.sidebar.markdown(
         "<div style='background-color:#222831;padding:0.7em 1em;border-radius:8px;margin-bottom:1em;'>"
@@ -210,6 +248,28 @@ with tabs[0]:
             ))
             fig.add_trace(go.Scatter(x=df_period['open_time'], y=df_period['SMA20'], line=dict(color='blue', width=1), name='SMA20'))
             fig.add_trace(go.Scatter(x=df_period['open_time'], y=df_period['SMA50'], line=dict(color='orange', width=1), name='SMA50'))
+            # --- Ajout de la courbe de divergence (1/-1/0) ---
+            if 'divergence' in df_period.columns:
+                fig.add_trace(go.Scatter(
+                    x=df_period['open_time'],
+                    y=df_period['divergence'],
+                    mode='lines',
+                    line=dict(color='purple', width=2, dash='dot'),
+                    name='Courbe de divergence',
+                    yaxis='y2'
+                ))
+                # Ajout d'un axe secondaire pour la divergence
+                fig.update_layout(
+                    yaxis2=dict(
+                        title='Divergence',
+                        overlaying='y',
+                        side='right',
+                        range=[-1.2, 1.2],
+                        showgrid=False,
+                        tickvals=[-1, 0, 1],
+                        ticktext=['Baissière', 'Aucune', 'Haussière']
+                    )
+                )
             # --- Ajout des signaux forts sur le graphique ---
             signals = df_period[(df_period['score'] >= score_threshold) & (df_period['divergence'] == 1)]
             max_signals = 30  # Limite d'affichage pour éviter surcharge
@@ -248,6 +308,31 @@ with tabs[0]:
             fig_vol.add_trace(go.Scatter(x=df_period['open_time'], y=df_period['VOL50'], name='VOL50', line=dict(color='orange')))
             fig_vol.update_layout(height=300)
             st.plotly_chart(fig_vol, use_container_width=True)
+        # --- NOUVEAU : graphique séparé pour la divergence ---
+        if 'divergence' in df_period.columns:
+            st.subheader("Courbe de divergence (prix vs MACD)")
+            import plotly.graph_objects as go
+            fig_div = go.Figure()
+            fig_div.add_trace(go.Scatter(
+                x=df_period['open_time'],
+                y=df_period['divergence'],
+                mode='lines+markers',
+                line=dict(color='purple', width=2, dash='dot'),
+                marker=dict(size=6),
+                name='Divergence'
+            ))
+            fig_div.update_layout(
+                yaxis=dict(
+                    title='Divergence',
+                    range=[-1.2, 1.2],
+                    tickvals=[-1, 0, 1],
+                    ticktext=['Baissière', 'Aucune', 'Haussière']
+                ),
+                xaxis_title='Date',
+                height=250,
+                template='plotly_dark'
+            )
+            st.plotly_chart(fig_div, use_container_width=True)
     else:
         st.warning(f"Impossible de charger les données : {error if error else 'Aucune donnée trouvée.'}")
 
@@ -377,8 +462,33 @@ with tabs[4]:
                 df_period, strategy=strategy, score_threshold=score_threshold, initial_capital=capital, fee=fee,
                 take_profit=take_profit, stop_loss=stop_loss, **kwargs
             )
+            # --- Ajout : calcul de la courbe Buy & Hold pour comparaison ---
+            if strategy != 'buy_and_hold':
+                equity_bh, _, _ = run_backtest(
+                    df_period, strategy='buy_and_hold', initial_capital=capital, fee=fee
+                )
+            else:
+                equity_bh = None
             st.subheader("Courbe de capital")
-            st.line_chart(equity_curve.set_index('open_time')['equity'])
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=equity_curve['open_time'],
+                y=equity_curve['equity'],
+                mode='lines',
+                name=f"Stratégie : {strategy}",
+                line=dict(width=2, color='royalblue')
+            ))
+            if equity_bh is not None:
+                fig.add_trace(go.Scatter(
+                    x=equity_bh['open_time'],
+                    y=equity_bh['equity'],
+                    mode='lines',
+                    name="Buy & Hold (marché)",
+                    line=dict(width=2, color='orange', dash='dash')
+                ))
+            fig.update_layout(xaxis_title='Date', yaxis_title='Capital', template='plotly_dark')
+            st.plotly_chart(fig, use_container_width=True)
             st.subheader("Statistiques")
             st.write(stats)
             st.subheader("Trades")
